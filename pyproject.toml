@@ -16,6 +16,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License"
 ]
 dependencies = [
+    "feast>=0.52.0",
     "ipython",
     "jupyterlab",
     "loguru",
@@ -25,11 +26,14 @@ dependencies = [
     "numpy",
     "pandas",
     "pip",
+    "pmdarima>=2.0.4",
+    "prophet>=1.1.7",
     "python-dotenv",
     "ruff",
     "scikit-learn",
     "tqdm",
     "typer",
+    "xgboost>=3.0.4",
 ]
 requires-python = "==3.12.1"
 
