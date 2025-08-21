@@ -2,3 +2,6 @@ data:
   raw: "data/raw"
   interim: "data/interim"
   processed: "data/processed"
+
+feast:
+  repo_path: "feature_repo/feature_repo"
