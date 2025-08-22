@@ -8,22 +8,29 @@ Registra experimentos en MLflow.
 
 import logging
 import yaml
-# import mlflow
 # import mlflow.sklearn
 from feast import FeatureStore
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 
 from sklearn.ensemble import BaggingRegressor
 from sklearn.tree import DecisionTreeRegressor
-# from sklearn.metrics import r2_score, silhouette_score
+from sklearn.cluster import KMeans # Importa KMeans para clustering
+from sklearn.metrics import mean_squared_error, mean_absolute_percentage_error, silhouette_score, davies_bouldin_score, calinski_harabasz_score
 # from sklearn.ensemble import RandomForestRegressor
-# from sklearn.cluster import KMeans
-# import numpy as np
+import numpy as np
+
+import dagshub  # Importa la librería dagshub para integrar el seguimiento de experimentos con DagsHub
+import mlflow   # Importa la librería mlflow para el seguimiento de experimentos de machine learning
+
+
+import xgboost as xgb
+
+import joblib
 
 # Configurar logging
 logging.basicConfig(
@@ -33,6 +40,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from pathlib import Path
+from functools import wraps
 
 # from loguru import logger
 # from tqdm import tqdm
@@ -62,45 +70,203 @@ def get_training_data(fs: FeatureStore, view_features: list) -> pd.DataFrame:
     return training_df
 
 
-def preprocessor_features(categorical_cols: list, numeric_cols: list) -> ColumnTransformer:
+def preprocessor_features(categorical_cols: list, numeric_cols: list, type: str = "supervised") -> ColumnTransformer:
     """Separar columnas categóricas y numéricas (encodering e imputación)"""
-    transformer = ColumnTransformer(
-        transformers=[
-            ("cat", Pipeline(steps=[
-                ("encoder", OneHotEncoder(handle_unknown="ignore")),
-                ("fillna", "passthrough")  # Rellenar valores nulos con "None"
-            ]), categorical_cols),
-            ("num", Pipeline(steps=[
-                ("fillna", SimpleImputer(strategy="constant", fill_value=0)),  # Rellenar valores nulos con 0
-            ]), numeric_cols),
-        ]
-    )
+    if type == "unsupervised":
+        # Para clustering, solo se imputan valores nulos
+        transformer = ColumnTransformer(
+            transformers=[
+                ("cat", Pipeline(steps=[
+                    ("encoder", OneHotEncoder(handle_unknown="ignore")),
+                    ("fillna", "passthrough")  # Rellenar valores nulos con "None"
+                ]), categorical_cols),
+                ("num", Pipeline(steps=[
+                    ("scaler", StandardScaler()),  # Escalado
+                    ("fillna", SimpleImputer(strategy="constant", fill_value=0)),  # Rellenar valores nulos con 0
+                ]), numeric_cols),
+            ]
+        )
+    else:
+        # Para modelos supervisados, se imputan valores nulos y se encodifican categóricas
+        transformer = ColumnTransformer(
+            transformers=[
+                ("cat", Pipeline(steps=[
+                    ("encoder", OneHotEncoder(handle_unknown="ignore")),
+                    ("fillna", "passthrough")  # Rellenar valores nulos con "None"
+                ]), categorical_cols),
+                ("num", Pipeline(steps=[
+                    ("fillna", SimpleImputer(strategy="constant", fill_value=0)),  # Rellenar valores nulos con 0
+                ]), numeric_cols),
+            ]
+        )
     return transformer
 
 
-def train_supervised(X_train, X_test, y_train, y_test, preprocessor: ColumnTransformer):
-    """Entrenamiento de modelos supervisados ensambles"""
-    model = BaggingRegressor(
-        estimator=DecisionTreeRegressor(),
-        n_estimators=10,
-        random_state=42
+def with_mlflow_autolog(func):
+    """Decorador para habilitar y deshabilitar mlflow.autolog automáticamente."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        mlflow.autolog()
+        try:
+            result = func(*args, **kwargs)  # ejecuta la función decorada
+        finally:
+            # Verifica si la función devuelve un dict con el modelo y su nombre
+            for r in result:
+                if isinstance(r, dict) and "model_path" in r and "model_name" in r:
+                    pipeline_pkl = r["model_path"]
+                    model_name = r["model_name"]
+
+                    mlflow.log_artifacts(
+                        pipeline_pkl,
+                        artifact_path=model_name
+                    )
+                    print(f"✅ Modelo registrado en MLflow: {model_name}")
+
+            mlflow.autolog(disable=True)   # siempre se deshabilita al final
+        return result
+    return wrapper
+
+
+@with_mlflow_autolog
+def train_supervised(X_train, X_test, y_train, y_test, preprocessor: ColumnTransformer) -> list:
+    """Entrenamiento de modelos supervisados ensambles y registro en MLflow."""
+
+    list_pkl = []
+
+    def model_bagging():
+        """Modelo de regresión con Bagging"""
+        return BaggingRegressor(
+            estimator=DecisionTreeRegressor(),
+            n_estimators=10,
+            random_state=42
+        )
+    
+    def model_xgboost():
+        """Modelo de regresión con XGBoost"""
+        model = xgb.XGBRegressor(
+            n_estimators=100,
+            learning_rate=0.1,
+            max_depth=6,
+            random_state=42
+        )
+        return model
+
+    ensamble_models = [model_bagging(), model_xgboost()]
+    for model in ensamble_models:
+        model_name = f"{model.__class__.__name__}_{model.get_params()['n_estimators']}"
+        with mlflow.start_run(run_name=model_name) as run:
+            logger.info(f"🤖🧠👾 Entrenando modelo: {model_name}")
+
+            # Definir modelo con pipeline
+            pipeline = Pipeline(steps=[
+                ("preprocessor", preprocessor),
+                ("model", model)
+            ])
+            # Entrenar el modelo
+            pipeline.fit(X_train, y_train)
+
+            # Predicciones
+            y_pred = pipeline.predict(X_test)
+
+            # Métricas
+            r2 = pipeline.score(X_test, y_test)    # r2 = 1 - sum((y_test - y_pred) ** 2) / sum((y_test - np.mean(y_test)) ** 2)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))  # rmse = ((y_test - y_pred) ** 2).mean() ** 0.5
+            mape = mean_absolute_percentage_error(y_test, y_pred)   # mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100
+
+            logger.info(f"R2 Score = {r2:.4f} | RMSE = {rmse:.4f} | MAPE = {mape:.4f}")
+
+            # Registra las métricas calculadas en MLflow
+            mlflow.log_metrics(
+                {
+                    "R2 Score": r2,
+                    "RMSE": rmse,
+                    "MAPE": mape
+                }
+            )
+
+            # Guarda el modelo entrenado localmente
+            model_path = PROJ_ROOT / "models"
+            logger.info(f"Guardando modelo en: {model_path}/{model_name}.pkl")
+            list_pkl.append({
+                "model_name": model_name,
+                "model_path": f"{model_path}/{model_name}.pkl"
+            })
+            joblib.dump(pipeline, list_pkl[-1]["model_path"])
+
+    return list_pkl
+
+
+@with_mlflow_autolog
+def train_unsupervised(X: pd.DataFrame, preprocessor: ColumnTransformer) -> list:
+    """Entrena un modelo no supervisado (clustering) y registra en MLflow."""
+
+    model = KMeans(n_clusters=4, random_state=42)
+    model_name = f"{model.__class__.__name__}_{model.n_clusters}"
+
+    with mlflow.start_run(run_name=model_name) as run:
+        # Pipeline con preprocesamiento + KMeans
+        pipeline = Pipeline(steps=[
+            ("preprocessor", preprocessor),
+            ("cluster", KMeans(n_clusters=4, random_state=42))
+        ])
+        # Entrenar el modelo
+        pipeline.fit(X)
+
+        list_pkl = []
+
+        # Extraer labels asignados
+        labels = pipeline.named_steps["cluster"].labels_
+
+        # Convertir a array denso para Davies-Bouldin y Calinski-Harabasz
+        X_transformed = pipeline.named_steps["preprocessor"].transform(X).toarray()
+
+        # Métricas de clustering
+        sil_score = silhouette_score(pipeline.named_steps["preprocessor"].transform(X), labels)
+        db_score = davies_bouldin_score(X_transformed, labels)
+        ch_score = calinski_harabasz_score(X_transformed, labels)
+
+        logger.info(f"Silhouette Score: {sil_score:.4f}")
+        logger.info(f"Davies-Bouldin Index: {db_score:.4f}")
+        logger.info(f"Calinski-Harabasz Index: {ch_score:.4f}")
+
+        # Registra las métricas calculadas en MLflow
+        mlflow.log_metrics(
+            {
+                "Silhouette Score": sil_score,
+                "Davies-Bouldin Index": db_score,
+                "Calinski-Harabasz Index": ch_score
+            }
+        )
+
+        # Guarda el modelo entrenado localmente
+        model_path = PROJ_ROOT / "models"
+        logger.info(f"Guardando modelo en: {model_path}/{model_name}.pkl")
+        list_pkl.append({
+            "model_name": model_name,
+            "model_path": f"{model_path}/{model_name}.pkl"
+        })
+        joblib.dump(pipeline, list_pkl[-1]["model_path"])
+
+    return list_pkl
+
+
+def mlflow_setup(repo_name: str):
+    """Configuración inicial de MLflow"""
+    # Inicializa la integración con DagsHub, especificando el propietario y nombre del repositorio,
+    # y habilita la integración con MLflow para registrar experimentos en DagsHub
+    dagshub.init(
+        repo_owner='edynsoncoronado',
+        repo_name=f'ml_{repo_name}',
+        mlflow=True
     )
 
-    # Definir modelo con pipeline
-    pipeline = Pipeline(steps=[
-        ("preprocessor", preprocessor),
-        ("model", model)
-    ])
-    # print("y_train-->:", y_train.info())
-    # print("X_train-->:", X_train.info())
-    # Entrenar el modelo
-    pipeline.fit(X_train, y_train)
+    # Establece la URI de seguimiento de MLflow para que apunte al servidor remoto de DagsHub,
+    # permitiendo así registrar y visualizar experimentos de MLflow en esa plataforma.
+    mlflow.set_tracking_uri(f"https://dagshub.com/edynsoncoronado/{repo_name}.mlflow")
 
-    # Evaluar el modelo
-    score = pipeline.score(X_test, y_test)
-    logger.info(f"R2 Score={score:.4f}")
-    return model
-
+    # Configura MLflow para registrar experimentos
+    mlflow.set_experiment(f"ml_{repo_name}")
+    
 
 def main():
     logger.info("Entrenamiento de modelos iniciado...")
@@ -124,14 +290,22 @@ def main():
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     # Definir columnas categóricas y numéricas
-    categorical_cols = ["family", "type_y"]
-    numeric_cols = [col for col in X.columns if col not in categorical_cols]
+    categorical_cols = X.select_dtypes(include=["object"]).columns
+    numeric_cols = X.select_dtypes(include=["int64", "float64"]).columns
 
-    # Crear el preprocesador
-    preprocessor = preprocessor_features(categorical_cols, numeric_cols)
 
+    # Crear el preprocesador para modelos supervisados y no supervisados
+    preprocessor_super = preprocessor_features(categorical_cols, numeric_cols, "supervised")
+    preprocessor_nosuper = preprocessor_features(categorical_cols, numeric_cols, "unsupervised")
+
+    # Configurar MLflow
+    mlflow_setup("sales_store_prediction_segmentation")
+    
     # Entrenar supervisado
-    train_supervised(X_train, X_test, y_train, y_test, preprocessor)
+    # train_supervised(X_train, X_test, y_train, y_test, preprocessor)
+
+    # Entrenar no supervisado
+    train_unsupervised(X, preprocessor_nosuper)
 
     # Aquí iría el código para entrenar el modelo usando las features cargadas
     # Por ejemplo, un modelo de regresión o clasificación

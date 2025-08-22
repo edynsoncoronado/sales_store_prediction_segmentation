@@ -1,0 +1,11 @@
+digest: e763a926
+name: dataset
+profile: '{"num_rows": 1000, "num_elements": 6000}'
+schema: '{"mlflow_colspec": [{"type": "long", "name": "store_nbr", "required": true},
+  {"type": "string", "name": "family", "required": true}, {"type": "long", "name":
+  "onpromotion", "required": true}, {"type": "double", "name": "transactions", "required":
+  false}, {"type": "double", "name": "dcoilwtico", "required": false}, {"type": "string",
+  "name": "type_y", "required": false}]}'
+source: '{"tags": {"mlflow.user": "edyn", "mlflow.source.name": "ml_prediction_segmentation/modeling/train.py",
+  "mlflow.source.type": "LOCAL", "mlflow.source.git.commit": "586594bcd6ba8e4db17026c4f9238e5b796292b0"}}'
+source_type: code

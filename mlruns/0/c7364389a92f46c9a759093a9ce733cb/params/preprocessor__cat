@@ -1,0 +1,2 @@
+Pipeline(steps=[('encoder', OneHotEncoder(handle_unknown='ignore')),
+                ('fillna', 'passthrough')])

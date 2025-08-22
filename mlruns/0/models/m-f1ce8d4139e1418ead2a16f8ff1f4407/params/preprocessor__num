@@ -1,0 +1,2 @@
+Pipeline(steps=[('scaler', StandardScaler()),
+                ('fillna', SimpleImputer(fill_value=0, strategy='constant'))])

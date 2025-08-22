@@ -1,0 +1,32 @@
+artifact_path: file:///home/edyn/Documentos/obsidian-doc/Projects/MachineLearningEngineer/Curso2/Proyecto/Repo/sales_store_prediction_segmentation/mlruns/0/models/m-f1ce8d4139e1418ead2a16f8ff1f4407/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.12.1
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.7.1
+is_signature_from_type_hint: false
+mlflow_version: 3.3.1
+model_id: m-f1ce8d4139e1418ead2a16f8ff1f4407
+model_size_bytes: 8936
+model_uuid: m-f1ce8d4139e1418ead2a16f8ff1f4407
+prompts: null
+run_id: c7364389a92f46c9a759093a9ce733cb
+signature:
+  inputs: '[{"type": "long", "name": "store_nbr", "required": true}, {"type": "string",
+    "name": "family", "required": true}, {"type": "long", "name": "onpromotion", "required":
+    true}, {"type": "double", "name": "transactions", "required": true}, {"type":
+    "double", "name": "dcoilwtico", "required": false}, {"type": "string", "name":
+    "type_y", "required": false}]'
+  outputs: '[{"type": "tensor", "tensor-spec": {"dtype": "int32", "shape": [-1]}}]'
+  params: null
+type_hint_from_example: false
+utc_time_created: '2025-08-22 19:20:55.265352'
