@@ -30,7 +30,9 @@ import mlflow   # Importa la librería mlflow para el seguimiento de experimento
 
 import xgboost as xgb
 
-import joblib
+import joblib   # Para guardar y cargar modelos
+import matplotlib.pyplot as plt # Para visualización de clusters
+from sklearn.decomposition import PCA   # Para reducción de dimensionalidad y visualización
 
 # Configurar logging
 logging.basicConfig(
@@ -237,6 +239,38 @@ def train_unsupervised(X: pd.DataFrame, preprocessor: ColumnTransformer) -> list
             modelpkl_path,
             # artifact_path=model_name
         )
+
+        # Reducir a 2 dimensiones para visualizar
+        pca = PCA(n_components=2, random_state=42)
+        X_pca = pca.fit_transform(X_transformed)
+
+        # Crear la figura
+        fig, ax = plt.subplots(figsize=(8,6))
+    
+        # Graficar los puntos
+        scatter = ax.scatter(X_pca[:,0], X_pca[:,1], c=labels, cmap="viridis", alpha=0.6)
+    
+        # Graficar centroides (proyectados a PCA)
+        ax.scatter(
+            pca.transform(pipeline.named_steps["cluster"].cluster_centers_)[:,0],
+            pca.transform(pipeline.named_steps["cluster"].cluster_centers_)[:,1],
+            c="red", marker="X", s=200, label="Centroides"
+        )
+    
+        # Personalización
+        ax.set_title("Clusters con KMeans (visualización PCA)")
+        ax.set_xlabel("Componente Principal 1")
+        ax.set_ylabel("Componente Principal 2")
+        ax.legend()
+    
+        # Registrar en MLflow
+        logger.info("📊 Guardando figura de clusters en MLflow")
+        mlflow.log_figure(
+            fig,
+            "plots/kmeans_clusters_pca.png"
+        )
+    
+        plt.close(fig)  # cerrar la figura para evitar duplicados en notebooks
 
     return [model_name]
 
