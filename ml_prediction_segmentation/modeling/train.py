@@ -109,19 +109,9 @@ def with_mlflow_autolog(func):
         mlflow.autolog()
         try:
             result = func(*args, **kwargs)  # ejecuta la función decorada
+            for model_name in result:
+                logger.info(f"💯🚀🎯 Modelo registrado en MLflow: {model_name}")
         finally:
-            # Verifica si la función devuelve un dict con el modelo y su nombre
-            for r in result:
-                if isinstance(r, dict) and "model_path" in r and "model_name" in r:
-                    pipeline_pkl = r["model_path"]
-                    model_name = r["model_name"]
-
-                    mlflow.log_artifacts(
-                        pipeline_pkl,
-                        artifact_path=model_name
-                    )
-                    print(f"✅ Modelo registrado en MLflow: {model_name}")
-
             mlflow.autolog(disable=True)   # siempre se deshabilita al final
         return result
     return wrapper
@@ -131,7 +121,7 @@ def with_mlflow_autolog(func):
 def train_supervised(X_train, X_test, y_train, y_test, preprocessor: ColumnTransformer) -> list:
     """Entrenamiento de modelos supervisados ensambles y registro en MLflow."""
 
-    list_pkl = []
+    list_models_name = []
 
     def model_bagging():
         """Modelo de regresión con Bagging"""
@@ -185,15 +175,17 @@ def train_supervised(X_train, X_test, y_train, y_test, preprocessor: ColumnTrans
             )
 
             # Guarda el modelo entrenado localmente
-            model_path = PROJ_ROOT / "models"
-            logger.info(f"Guardando modelo en: {model_path}/{model_name}.pkl")
-            list_pkl.append({
-                "model_name": model_name,
-                "model_path": f"{model_path}/{model_name}.pkl"
-            })
-            joblib.dump(pipeline, list_pkl[-1]["model_path"])
+            modelpkl_path = f"{PROJ_ROOT / "models"}/{model_name}.pkl"
+            logger.info(f"Guardando modelo en: {modelpkl_path}")
+            joblib.dump(pipeline, modelpkl_path)
 
-    return list_pkl
+            mlflow.log_artifact(
+                modelpkl_path,
+                # artifact_path=model_name
+            )
+        list_models_name.append(model_name)
+
+    return list_models_name
 
 
 @with_mlflow_autolog
@@ -207,12 +199,10 @@ def train_unsupervised(X: pd.DataFrame, preprocessor: ColumnTransformer) -> list
         # Pipeline con preprocesamiento + KMeans
         pipeline = Pipeline(steps=[
             ("preprocessor", preprocessor),
-            ("cluster", KMeans(n_clusters=4, random_state=42))
+            ("cluster", model)
         ])
         # Entrenar el modelo
         pipeline.fit(X)
-
-        list_pkl = []
 
         # Extraer labels asignados
         labels = pipeline.named_steps["cluster"].labels_
@@ -239,15 +229,16 @@ def train_unsupervised(X: pd.DataFrame, preprocessor: ColumnTransformer) -> list
         )
 
         # Guarda el modelo entrenado localmente
-        model_path = PROJ_ROOT / "models"
-        logger.info(f"Guardando modelo en: {model_path}/{model_name}.pkl")
-        list_pkl.append({
-            "model_name": model_name,
-            "model_path": f"{model_path}/{model_name}.pkl"
-        })
-        joblib.dump(pipeline, list_pkl[-1]["model_path"])
+        modelpkl_path = f"{PROJ_ROOT / "models"}/{model_name}.pkl"
+        logger.info(f"Guardando modelo en: {modelpkl_path}")
+        joblib.dump(pipeline, modelpkl_path)
 
-    return list_pkl
+        mlflow.log_artifact(
+            modelpkl_path,
+            # artifact_path=model_name
+        )
+
+    return [model_name]
 
 
 def mlflow_setup(repo_name: str):
@@ -266,6 +257,7 @@ def mlflow_setup(repo_name: str):
 
     # Configura MLflow para registrar experimentos
     mlflow.set_experiment(f"ml_{repo_name}")
+    return True
     
 
 def main():
@@ -302,13 +294,10 @@ def main():
     mlflow_setup("sales_store_prediction_segmentation")
     
     # Entrenar supervisado
-    # train_supervised(X_train, X_test, y_train, y_test, preprocessor)
+    train_supervised(X_train, X_test, y_train, y_test, preprocessor_super)
 
     # Entrenar no supervisado
     train_unsupervised(X, preprocessor_nosuper)
-
-    # Aquí iría el código para entrenar el modelo usando las features cargadas
-    # Por ejemplo, un modelo de regresión o clasificación
 
     logger.info("Entrenamiento de modelos completado.")
 
