@@ -1,0 +1,1 @@
+[('encoder', OneHotEncoder(handle_unknown='ignore')), ('fillna', 'passthrough')]

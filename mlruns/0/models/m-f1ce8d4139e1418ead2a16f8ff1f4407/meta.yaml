@@ -1,0 +1,10 @@
+artifact_location: file:///home/edyn/Documentos/obsidian-doc/Projects/MachineLearningEngineer/Curso2/Proyecto/Repo/sales_store_prediction_segmentation/mlruns/0/models/m-f1ce8d4139e1418ead2a16f8ff1f4407/artifacts
+creation_timestamp: 1755890455250
+experiment_id: '0'
+last_updated_timestamp: 1755890457868
+model_id: m-f1ce8d4139e1418ead2a16f8ff1f4407
+model_type: null
+name: model
+source_run_id: c7364389a92f46c9a759093a9ce733cb
+status: 2
+status_message: null
